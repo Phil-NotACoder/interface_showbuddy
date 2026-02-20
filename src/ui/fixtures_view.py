@@ -1,150 +1,235 @@
-# src/ui/fixtures_view.py
-
+# fichier: src/ui/fixtures_view.py
 import tkinter as tk
-from math import ceil
-from typing import Callable, Dict, Tuple, Optional
+from tkinter import ttk
+from typing import Callable, Dict, Optional
 
-class FixturesView(tk.Canvas):
+BAR_HEIGHT = 10          # hauteur d'une barre (rgba, w, dimmer, strobe)
+BAR_SPACING = 4          # espace vertical entre barres
+CELL_PADDING = 8         # marge intérieure d'une cellule
+CELL_W = 160             # largeur d'une cellule (fixe, grille auto)
+CELL_H = 140             # hauteur d'une cellule
+COLS = 5                 # nombre de colonnes pour l'auto-grid
+
+# Couleurs de barres
+COLOR_R = "#ff4040"
+COLOR_G = "#40ff40"
+COLOR_B = "#4040ff"
+COLOR_A = "#aaaaaa"      # alpha = gris pour la visu
+COLOR_W = "#ffffff"
+COLOR_DIMMER_BG = "#2a2a2a"
+COLOR_DIMMER = "#ffffff"
+COLOR_STROBE = "#b36bff"  # violet
+
+# Contour sélection
+SELECT_OUTLINE = "#00c8ff"
+SELECT_WIDTH = 3
+
+def _clamp01(x: float) -> float:
+    try:
+        return max(0.0, min(1.0, float(x)))
+    except Exception:
+        return 0.0
+
+class FixturesView(ttk.Frame):
     """
-    Step 2b :
-    - Dessine 12 fixtures en grille
-    - Détection de clic (sélection)
-    - Affiche un halo bleu autour de la sélection
-    - Appelle un callback on_select(fixture_id) fourni par MainWindow
+    Vue principale qui dessine les fixtures en grille.
+    Chaque fixture est une cellule avec 7 barres : R G B A W | Dimmer | Strobe
+    - on_select(fid: int | None) est appelé quand l'utilisateur clique une cellule
+    - render(state) est appelé depuis la boucle UI pour redessiner.
     """
+    def __init__(self, parent, on_select: Optional[Callable[[Optional[int]], None]] = None):
+        super().__init__(parent)
+        self._on_select = on_select
 
-    def __init__(self, master, on_select: Callable[[Optional[int]], None] = None, **kwargs):
-        super().__init__(master, background='#111319', highlightthickness=0, **kwargs)
-        self.placeholder_count = 12
-        self.on_select = on_select
+        # Canvas pour dessiner la grille
+        self.canvas = tk.Canvas(self, bg="#151515", highlightthickness=0)
+        self.canvas.pack(fill=tk.BOTH, expand=True)
 
-        # mapping: fixture_id -> (cx, cy, r, body_id, label_id, halo_id)
-        self._items: Dict[int, Tuple[float, float, float, int, int, Optional[int]]] = {}
+        # Données de placement (id -> bbox)
+        self._cell_bbox: Dict[int, tuple[int, int, int, int]] = {}
         self._selected_id: Optional[int] = None
 
-        # Bind events
-        self.bind('<Configure>', self._on_resize)
-        self.bind('<Button-1>', self._on_click)
+        # Binding clic
+        self.canvas.bind("<Button-1>", self._on_click)
 
-        self._draw()
+        # Mise à l'échelle responsive
+        self.bind("<Configure>", self._on_resize)
+
+        # Cache dernière taille
+        self._last_w = 0
+        self._last_h = 0
+
+        # Dernier état rendu (référence non conservée, on copie ce qu'il faut)
+        self._last_fixture_ids = []
 
     # ----------------------------------------------------------------------
-    # EVENT : Redessiner lors d'un resize
+    # Public API
     # ----------------------------------------------------------------------
-    def _on_resize(self, event):
-        self._draw()
-
-    # ----------------------------------------------------------------------
-    # API : sélection commandée par MainWindow
-    # ----------------------------------------------------------------------
-    def set_selected(self, fixture_id: Optional[int]):
-        """Met à jour l'affichage en fonction d'un id sélectionné (ou None)."""
-        self._selected_id = fixture_id
-
-        # Effacer tous les halos existants
-        for fid, (cx, cy, r, body_id, label_id, halo_id) in list(self._items.items()):
-            if halo_id is not None:
-                self.delete(halo_id)
-                self._items[fid] = (cx, cy, r, body_id, label_id, None)
-
-        # Dessiner le halo sur le fixture sélectionné
-        if fixture_id is not None and fixture_id in self._items:
-            cx, cy, r, body_id, label_id, _ = self._items[fixture_id]
-            halo = self.create_oval(
-                cx - r*1.35, cy - r*1.35, cx + r*1.35, cy + r*1.35,
-                outline='#4da3ff', width=3
+    def render(self, state) -> None:
+        """
+        Redessine toutes les cellules à partir de `state.fixtures`.
+        `state` est une instance de core.state.AppState.
+        """
+        # Calcule la grille à partir des ids actuels
+        fixture_ids = sorted(state.fixtures.keys())
+        if not fixture_ids:
+            # Si aucun fixture reçu pour le moment, on efface et affiche un message
+            self.canvas.delete("all")
+            self.canvas.create_text(
+                self.canvas.winfo_width() // 2,
+                self.canvas.winfo_height() // 2,
+                text="En attente de données...\n(/app/hello, /fixture/*, /frame)",
+                fill="#888",
+                font=("Segoe UI", 12),
+                justify="center"
             )
-            self._items[fixture_id] = (cx, cy, r, body_id, label_id, halo)
-
-    # ----------------------------------------------------------------------
-    # EVENT : clic souris
-    # ----------------------------------------------------------------------
-    def _on_click(self, event):
-        fid = self._hit_test(event.x, event.y)
-
-        if fid is None:
-            # clic dans le vide -> désélection
-            self.set_selected(None)
-            if callable(self.on_select):
-                self.on_select(None)
-        else:
-            self.set_selected(fid)
-            if callable(self.on_select):
-                self.on_select(fid)
-
-    # ----------------------------------------------------------------------
-    # Dessin complet
-    # ----------------------------------------------------------------------
-    def _draw(self):
-        self.delete('all')
-
-        previous_selected = self._selected_id
-        self._items.clear()
-
-        w = max(self.winfo_width(), 1)
-        h = max(self.winfo_height(), 1)
-
-        title = 'Fixtures — Click to select (Step 2b)\n/ui/select {id}'
-        self.create_text(
-            w/2, 24, text=title,
-            fill='#9aa3b2', font=('Segoe UI', 12),
-            justify='center'
-        )
-
-        # grille calculée
-        count = self.placeholder_count
-        cols = 4
-        rows = ceil(count / cols)
-        margin = 40
-        title_h = 24
-
-        grid_w = w - 2*margin
-        grid_h = h - 2*margin - title_h
-
-        if grid_w <= 0 or grid_h <= 0:
             return
 
-        cell_w = grid_w / cols
-        cell_h = grid_h / rows
-        radius = min(cell_w, cell_h) * 0.3
+        # Redessiner si la liste d'ids a changé, ou si la taille a changé,
+        # ou tout simplement à chaque frame (on garde simple).
+        self.canvas.delete("all")
+        self._cell_bbox.clear()
 
-        idx = 0
-        for r_idx in range(rows):
-            for c_idx in range(cols):
-                if idx >= count:
-                    break
+        # Calcul grille
+        cols = max(1, COLS)
+        # cell width/height peuvent rester fixes pour garder la lisibilité.
+        cell_w = CELL_W
+        cell_h = CELL_H
 
-                fid = idx + 1
-                cx = margin + c_idx*cell_w + cell_w/2
-                cy = margin + title_h + r_idx*cell_h + cell_h/2
+        # Calcul du décalage pour centrer la grille
+        W = max(1, self.canvas.winfo_width())
+        H = max(1, self.canvas.winfo_height())
 
-                # corps du projecteur
-                body = self.create_oval(
-                    cx - radius, cy - radius,
-                    cx + radius, cy + radius,
-                    fill='#243042', outline='#3a4a64', width=2
-                )
+        rows = (len(fixture_ids) + cols - 1) // cols
+        grid_w = cols * cell_w
+        grid_h = rows * cell_h
 
-                # étiquette
-                text_id = self.create_text(
-                    cx, cy, text=str(fid),
-                    fill='#d1d7e0', font=('Segoe UI', 11, 'bold')
-                )
+        offset_x = max(0, (W - grid_w) // 2)
+        offset_y = max(0, (H - grid_h) // 2)
 
-                self._items[fid] = (cx, cy, radius, body, text_id, None)
-                idx += 1
+        # Dessin des cellules
+        for idx, fid in enumerate(fixture_ids):
+            r = idx // cols
+            c = idx % cols
+            x0 = offset_x + c * cell_w
+            y0 = offset_y + r * cell_h
+            x1 = x0 + cell_w
+            y1 = y0 + cell_h
 
-        # si un fixture était sélectionné avant redessin
-        if previous_selected is not None:
-            self.set_selected(previous_selected)
+            self._draw_cell(fid, (x0, y0, x1, y1), state)
+            self._cell_bbox[fid] = (x0, y0, x1, y1)
+
+        # Sélection visuelle si existante
+        self._selected_id = state.selected_fixture
+        if self._selected_id in self._cell_bbox:
+            x0, y0, x1, y1 = self._cell_bbox[self._selected_id]
+            self.canvas.create_rectangle(
+                x0 + 2, y0 + 2, x1 - 2, y1 - 2,
+                outline=SELECT_OUTLINE, width=SELECT_WIDTH
+            )
+
+        self._last_fixture_ids = fixture_ids
 
     # ----------------------------------------------------------------------
-    # Détection de clic
+    # Dessin d'une cellule
     # ----------------------------------------------------------------------
-    def _hit_test(self, x, y) -> Optional[int]:
-        for fid, (cx, cy, r, *_rest) in self._items.items():
-            dx = x - cx
-            dy = y - cy
-            if dx*dx + dy*dy <= r*r:
-                return fid
-        return None
+    def _draw_cell(self, fid: int, bbox: tuple[int, int, int, int], state) -> None:
+        x0, y0, x1, y1 = bbox
+
+        # Fond cellule
+        self.canvas.create_rectangle(x0, y0, x1, y1, fill="#1b1b1b", outline="#2c2c2c")
+
+        # Titre (id)
+        title = f"Fixture {fid}"
+        self.canvas.create_text(
+            x0 + CELL_PADDING, y0 + CELL_PADDING,
+            text=title, anchor="nw", fill="#d0d0d0", font=("Segoe UI", 10, "bold")
+        )
+
+        # Récupération des valeurs
+        fx = state.fixtures.get(fid)
+        if fx is None:
+            # Placeholder si pas encore reçu quoi que ce soit
+            return
+
+        # Zone des barres
+        bx0 = x0 + CELL_PADDING
+        bx1 = x1 - CELL_PADDING
+        by = y0 + CELL_PADDING + 20  # sous le titre
+
+        # Barres couleur RGBAW
+        self._draw_bar(bx0, by, bx1, by + BAR_HEIGHT, fx.r, COLOR_R, "R")
+        by += BAR_HEIGHT + BAR_SPACING
+        self._draw_bar(bx0, by, bx1, by + BAR_HEIGHT, fx.g, COLOR_G, "G")
+        by += BAR_HEIGHT + BAR_SPACING
+        self._draw_bar(bx0, by, bx1, by + BAR_HEIGHT, fx.b, COLOR_B, "B")
+        by += BAR_HEIGHT + BAR_SPACING
+        self._draw_bar(bx0, by, bx1, by + BAR_HEIGHT, fx.a, COLOR_A, "A")
+        by += BAR_HEIGHT + BAR_SPACING
+        self._draw_bar(bx0, by, bx1, by + BAR_HEIGHT, fx.w, COLOR_W, "W", outline="#3a3a3a")
+        by += BAR_HEIGHT + BAR_SPACING
+
+        # Dimmer (fond sombre + remplissage blanc)
+        self._draw_bar(bx0, by, bx1, by + BAR_HEIGHT, fx.dimmer, COLOR_DIMMER, "Dim", bg=COLOR_DIMMER_BG)
+        by += BAR_HEIGHT + BAR_SPACING
+
+        # Strobe (violet)
+        self._draw_bar(bx0, by, bx1, by + BAR_HEIGHT, fx.strobe, COLOR_STROBE, "Strb")
+        # by += ...
+
+    def _draw_bar(
+        self,
+        x0: int, y0: int, x1: int, y1: int,
+        value: float,
+        color: str,
+        label: str,
+        bg: Optional[str] = None,
+        outline: Optional[str] = None,
+    ) -> None:
+        v = _clamp01(value)
+        # fond
+        if bg:
+            self.canvas.create_rectangle(x0, y0, x1, y1, fill=bg, outline=outline or bg)
+        else:
+            self.canvas.create_rectangle(x0, y0, x1, y1, fill="#252525", outline=outline or "#303030")
+
+        # remplissage proportionnel
+        width = x1 - x0
+        fill_w = int(width * v)
+        if fill_w > 0:
+            self.canvas.create_rectangle(x0, y0, x0 + fill_w, y1, fill=color, outline=color)
+
+        # label (à gauche)
+        self.canvas.create_text(x0 - 4, (y0 + y1) // 2, text=label, anchor="e", fill="#8a8a8a", font=("Segoe UI", 9))
+
+    # ----------------------------------------------------------------------
+    # Interaction
+    # ----------------------------------------------------------------------
+    def _on_click(self, event) -> None:
+        # Trouver la cellule cliquée
+        x, y = event.x, event.y
+        clicked_id = None
+        for fid, (x0, y0, x1, y1) in self._cell_bbox.items():
+            if x0 <= x <= x1 and y0 <= y <= y1:
+                clicked_id = fid
+                break
+
+        # Toggle si on reclique la même cellule -> désélection
+        if clicked_id is not None:
+            if self._selected_id == clicked_id:
+                self._selected_id = None
+                if self._on_select:
+                    self._on_select(None)
+            else:
+                self._selected_id = clicked_id
+                if self._on_select:
+                    self._on_select(clicked_id)
+
+    def _on_resize(self, _event) -> None:
+        # Redessiner lors de changements de taille (le prochain render mettra à jour)
+        w = self.canvas.winfo_width()
+        h = self.canvas.winfo_height()
+        if w != self._last_w or h != self._last_h:
+            # Pas de redraw immédiat ici pour éviter de dessiner 2x,
+            # le prochain run de on_tick() fera un render actualisé.
+            self._last_w, self._last_h = w, h

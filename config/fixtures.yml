@@ -1,16 +1,7 @@
-# config/fixtures.yml (template) — will be used in Step 3
-# You can predefine fixtures and positions here. Example:
-#
-# fixtures:
-#   - id: 1
-#     label: Front-L-1
-#     x: 0.1   # normalized 0..1
-#     y: 0.2
-#     channels: [dimmer, r, g, b, a, w, strobe, aux1, aux2]
-#   - id: 2
-#     label: Front-L-2
-#     x: 0.3
-#     y: 0.2
-#     channels: [dimmer, r, g, b, a, w, strobe, aux1, aux2]
-#
-# If not provided, the app will auto-grid placeholders (Step 1 default).
+# fichier: config/fixtures.yml
+fixtures:
+  count: 4          # minimum 4 (tu peux mettre 5..20 quand tu veux)
+  defaults:
+    color: [0.0, 0.0, 0.0, 0.0, 0.0]   # r,g,b,a,w
+    dimmer: 0.0
+    strobe: 0.0
