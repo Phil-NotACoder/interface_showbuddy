@@ -1,7 +1,43 @@
-# fichier: config/fixtures.yml
 fixtures:
-  count: 4          # minimum 4 (tu peux mettre 5..20 quand tu veux)
+  count: 4          # minimum 4
   defaults:
     color: [0.0, 0.0, 0.0, 0.0, 0.0]   # r,g,b,a,w
     dimmer: 0.0
     strobe: 0.0
+  items:
+    - id: 1
+      x: 0.25
+      y: 0.33
+      shape: circle
+      circle_size: 0.08
+      beam_length: 0.15
+      beam_width: 0.10
+      beam_angle_deg: 0.0
+      label: ""
+    - id: 2
+      x: 0.50
+      y: 0.33
+      shape: circle
+      circle_size: 0.08
+      beam_length: 0.15
+      beam_width: 0.10
+      beam_angle_deg: 0.0
+      label: ""
+    - id: 3
+      x: 0.25
+      y: 0.66
+      shape: circle
+      circle_size: 0.08
+      beam_length: 0.15
+      beam_width: 0.10
+      beam_angle_deg: 0.0
+      label: ""
+    - id: 4
+      x: 0.50
+      y: 0.66
+      shape: circle
+      circle_size: 0.08
+      beam_length: 0.15
+      beam_width: 0.10
+      beam_angle_deg: 0.0
+      label: ""
