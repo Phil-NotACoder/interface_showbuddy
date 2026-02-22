@@ -1,43 +1,18 @@
+# Configuration des fixtures (lumières)
 fixtures:
-  count: 4          # minimum 4
-  defaults:
-    color: [0.0, 0.0, 0.0, 0.0, 0.0]   # r,g,b,a,w
-    dimmer: 0.0
-    strobe: 0.0
-  items:
-    - id: 1
-      x: 0.25
-      y: 0.33
-      shape: circle
-      circle_size: 0.08
-      beam_length: 0.15
-      beam_width: 0.10
-      beam_angle_deg: 0.0
-      label: ""
-    - id: 2
-      x: 0.50
-      y: 0.33
-      shape: circle
-      circle_size: 0.08
-      beam_length: 0.15
-      beam_width: 0.10
-      beam_angle_deg: 0.0
-      label: ""
-    - id: 3
-      x: 0.25
-      y: 0.66
-      shape: circle
-      circle_size: 0.08
-      beam_length: 0.15
-      beam_width: 0.10
-      beam_angle_deg: 0.0
-      label: ""
-    - id: 4
-      x: 0.50
-      y: 0.66
-      shape: circle
-      circle_size: 0.08
-      beam_length: 0.15
-      beam_width: 0.10
-      beam_angle_deg: 0.0
-      label: ""
+  count: 4  # Nombre de fixtures au démarrage
+
+defaults:
+  # Valeurs DMX / Couleur existantes
+  color: [0, 0, 0, 0, 0] # R, G, B, A, W
+  dimmer: 0
+  strobe: 0
+  
+  # NOUVEAU : Propriétés visuelles et spatiales
+  x: 100.0          # Position horizontale (en pixels)
+  y: 100.0          # Position verticale (en pixels)
+  shape: "circle"   # Forme : "circle" ou "beam"
+  radius: 20.0      # Rayon (grosseur) pour le cercle
+  angle: 0.0        # Angle de rotation (pour le beam)
+  beam_length: 100.0 # Longueur du rayon
+  beam_spread: 45.0  # Largeur/Ouverture du rayon (en degrés)

@@ -1,104 +1,96 @@
-# fichier: src/ui/controls_list.py
 import tkinter as tk
 from tkinter import ttk
-from typing import Callable, Optional
+from .widgets import ScrollableFrame
 
-PARAMS = [
-    ("R", "r"), ("G", "g"), ("B", "b"), ("A", "a"), ("W", "w"),
-    ("Dim", "dimmer"), ("Strb", "strobe"),
-]
-
-def _clamp01(x: float) -> float:
-    try:
-        return max(0.0, min(1.0, float(x)))
-    except Exception:
-        return 0.0
 
 class ControlsListView(ttk.Frame):
-    """
-    Panneau scrollable contenant un groupe de 7 sliders pour chaque fixture.
-    - Appeler render(state) à chaque tick (léger).
-    - Callback on_change(fid:int, name:str, value:float) pour propager les modifications.
-    - La vue se régénère si l'ensemble des fixture IDs a changé.
-    """
-
-    def __init__(self, parent, on_change: Optional[Callable[[int,str,float], None]] = None):
+    def __init__(self, parent, on_change=None):
         super().__init__(parent)
-        self._on_change = on_change
+        self.on_change = on_change
 
-        # Scrollable area
-        self.canvas = tk.Canvas(self, bg="#141414", highlightthickness=0)
-        self.vsb = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
-        self.inner = ttk.Frame(self.canvas)
+        # Dictionnaire pour stocker les widgets existants {fixture_id: {param: variable, frame: widget}}
+        self.rows = {}
 
-        self.inner.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
-        self.canvas.create_window((0,0), window=self.inner, anchor="nw")
-        self.canvas.configure(yscrollcommand=self.vsb.set)
+        self.scroll_frame = ScrollableFrame(self)
+        self.scroll_frame.pack(fill="both", expand=True)
+        self.inner = self.scroll_frame.scrollable_frame
 
-        self.canvas.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
-        self.vsb.pack(fill=tk.Y, side=tk.RIGHT)
+    def render(self, state):
+        current_ids = set(state.fixtures.keys())
+        existing_ids = set(self.rows.keys())
 
-        # state
-        self._built_for_ids = []
-        self._widgets = {}   # fid -> { name -> (scale, var, labelVar) }
+        # 1. Supprimer les fixtures qui n'existent plus
+        for fid in existing_ids - current_ids:
+            self.rows[fid]["frame"].destroy()
+            del self.rows[fid]
 
-    # ------------------------------------------------------------------
-    def render(self, state) -> None:
-        ids = sorted(state.fixtures.keys())
-        if ids != self._built_for_ids:
-            self._rebuild(ids, state)
+        # 2. Créer les nouvelles fixtures
+        for fid in current_ids - existing_ids:
+            self._create_fixture_row(fid, state.fixtures[fid])
 
-        # Update values from state (no callback loop)
-        for fid in ids:
-            fx = state.fixtures.get(fid)
-            if not fx:
-                continue
-            wmap = self._widgets.get(fid, {})
-            for short, name in PARAMS:
-                var = wmap.get(name, {}).get("var")
-                valLabel = wmap.get(name, {}).get("val")
-                if var is None or valLabel is None:
-                    continue
-                cur = getattr(fx, name if name != "dim" else "dimmer", getattr(fx, name, 0.0))
-                cur = _clamp01(cur)
-                if abs(var.get() - cur) > 1e-6:
-                    var.set(cur)
-                    valLabel.set(f"{cur:.2f}")
+        # 3. Mettre à jour les valeurs (sans rien détruire)
+        for fid in current_ids:
+            self._update_fixture_values(fid, state.fixtures[fid], state.selected_fixture_id)
 
-    # ------------------------------------------------------------------
-    def _rebuild(self, ids, state):
-        for child in self.inner.winfo_children():
-            child.destroy()
-        self._widgets.clear()
+    def _create_fixture_row(self, fid, fixture):
+        # Cadre principal pour une fixture
+        frame = tk.Frame(self.inner, bg="#141414", bd=1, relief="solid")
+        frame.pack(fill="x", padx=5, pady=5)
 
-        row = 0
-        for fid in ids:
-            group = ttk.LabelFrame(self.inner, text=f"Fixture {fid}", padding=8)
-            group.grid(row=row, column=0, sticky="ew", padx=8, pady=6)
-            group.columnconfigure(1, weight=1)
-            self._widgets[fid] = {}
+        # En-tête
+        header = tk.Label(frame, text=f"FIXTURE {fid}", fg="white", bg="#222", font=("Arial", 10, "bold"), anchor="w")
+        header.pack(fill="x", padx=2, pady=2)
 
-            fx = state.fixtures.get(fid)
+        row_data = {"frame": frame, "vars": {}}
 
-            r2 = 0
-            for short, name in PARAMS:
-                ttk.Label(group, text=short, width=6).grid(row=r2, column=0, sticky="w", pady=2)
-                var = tk.DoubleVar(value=_clamp01(getattr(fx, name if name!="dim" else "dimmer", getattr(fx, name, 0.0)) if fx else 0.0))
-                scale = ttk.Scale(group, from_=0.0, to=1.0, orient=tk.HORIZONTAL, variable=var,
-                                  command=lambda _v, _fid=fid, _n=name, _var=var: self._on_scale(_fid, _n, _var))
-                scale.grid(row=r2, column=1, sticky="ew", padx=6, pady=2)
-                valVar = tk.StringVar(value=f"{var.get():.2f}")
-                ttk.Label(group, textvariable=valVar, width=6).grid(row=r2, column=2, sticky="e", pady=2)
+        # Liste des sliders
+        controls = [
+            ("r", "R", "#ff4444"),
+            ("g", "G", "#44ff44"),
+            ("b", "B", "#4444ff"),
+            ("amber", "A", "#ffaa00"),
+            ("white", "W", "#ffffff"),
+            ("dimmer", "D", "#aaaaaa"),
+            ("strobe", "S", "#cccccc")
+        ]
 
-                self._widgets[fid][name] = {"scale": scale, "var": var, "val": valVar}
-                r2 += 1
+        for param, label, color in controls:
+            sub_frame = tk.Frame(frame, bg="#141414")
+            sub_frame.pack(fill="x", padx=2, pady=1)
 
-            row += 1
+            tk.Label(sub_frame, text=label, fg=color, bg="#141414", width=2, font=("Arial", 8, "bold")).pack(
+                side="left")
 
-        self._built_for_ids = ids
+            var = tk.DoubleVar(value=getattr(fixture, param, 0))
+            row_data["vars"][param] = var
 
-    def _on_scale(self, fid: int, name: str, var: tk.DoubleVar):
-        v = _clamp01(var.get())
-        var.set(v)
-        if self._on_change:
-            self._on_change(fid, name, v)
+            scale = tk.Scale(sub_frame, variable=var, from_=0, to=255, orient="horizontal",
+                             bg="#141414", fg="white", troughcolor="#333",
+                             activebackground=color, highlightthickness=0, showvalue=0)
+            scale.pack(side="left", fill="x", expand=True)
+
+            # Callback
+            var.trace_add("write", lambda *args, p=param, v=var, f=fid: self._on_val_change(f, p, v))
+
+        self.rows[fid] = row_data
+
+    def _update_fixture_values(self, fid, fixture, selected_id):
+        row_data = self.rows[fid]
+
+        # Mise en évidence visuelle si sélectionné
+        bg_color = "#444" if fid == selected_id else "#141414"
+        # On pourrait changer la couleur de fond du header ici si on voulait
+
+        # Mise à jour des sliders si la valeur a changé (ex: via load ou autre)
+        for param, var in row_data["vars"].items():
+            target_val = getattr(fixture, param, 0)
+            if abs(var.get() - target_val) > 0.5:
+                var.set(target_val)
+
+    def _on_val_change(self, fid, param, var):
+        try:
+            val = var.get()
+            if self.on_change:
+                self.on_change(fid, param, val)
+        except:
+            pass
